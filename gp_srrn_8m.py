@@ -809,7 +809,17 @@ class GpSRNNModel(nn.Module):
                 
                 # Sampling
                 probs = F.softmax(logits, dim=-1)
+                
+                # Garante que não haja NaN ou Inf nas probabilidades
+                probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+                
+                # Normaliza novamente para garantir soma = 1
+                probs = probs / (probs.sum(dim=-1, keepdim=True) + 1e-8)
+                
                 next_token = torch.multinomial(probs, num_samples=1)  # [B, 1]
+                
+                # Garante que o token está dentro do vocabulário
+                next_token = next_token.clamp(0, self.config.vocab_size - 1)
                 
                 generated.append(next_token)
                 
