@@ -22,21 +22,21 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from gp_srrn_8m import GpSRNNConfig, GpSRNNModel, SimpleBPETokenizer as BPETokenizer
+from gp_srrn_8m import GpSRNNConfig, GpSRNNModel, SimpleBPETokenizer
 
 
 class TextDataset(Dataset):
     """Dataset de texto para treinamento"""
     
-    def __init__(self, text: str, tokenizer: BPETokenizer, seq_length: int = 128):
+    def __init__(self, text: str, tokenizer, seq_length: int = 128):
         self.tokenizer = tokenizer
         self.seq_length = seq_length
         
-        # Tokenizar todo o texto
-        self.tokens = tokenizer.encode(text)
+        # Tokenizar todo o texto SEM tokens especiais (bos/eos)
+        self.tokens = tokenizer.encode(text, add_special_tokens=False)
         
         # Calcular número de sequências
-        self.n_sequences = max(0, len(self.tokens) - seq_length)
+        self.n_sequences = max(0, len(self.tokens) - seq_length - 1)
         
         print(f"  Tokens totais: {len(self.tokens):,}")
         print(f"  Sequências de treino: {self.n_sequences:,}")
@@ -221,7 +221,7 @@ def save_checkpoint(model, tokenizer, optimizer, epoch, loss, path: str):
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'config': model.config,
-        'vocab': tokenizer.vocab,
+        'vocab': tokenizer.token_to_id,
         'merges': tokenizer.merges,
     }
     
@@ -238,10 +238,10 @@ def load_checkpoint(path: str, device):
     model = GpSRNNModel(config)
     model.load_state_dict(checkpoint['model_state_dict'])
     
-    tokenizer = BPETokenizer()
-    tokenizer.vocab = checkpoint['vocab']
+    tokenizer = SimpleBPETokenizer()
+    tokenizer.token_to_id = checkpoint['vocab']
+    tokenizer.id_to_token = {v: k for k, v in checkpoint['vocab'].items()}
     tokenizer.merges = checkpoint['merges']
-    tokenizer._build_reverse_vocab()
     
     return model, tokenizer, checkpoint
 
@@ -336,14 +336,25 @@ def main():
     
     # Criar tokenizer
     print("\n🔤 Criando tokenizer...")
-    tokenizer = BPETokenizer(vocab_size=args.vocab_size)
-    tokenizer.train_from_text(text)
-    print(f"  Vocabulário: {len(tokenizer.vocab)} tokens")
+    tokenizer = SimpleBPETokenizer(vocab_size=args.vocab_size)
+    # Divide o texto em chunks para treinamento
+    chunk_size = 1000
+    texts = [text[i:i+chunk_size] for i in range(0, min(len(text), 50000), chunk_size)]
+    tokenizer.train(texts, target_vocab_size=args.vocab_size)
+    print(f"  Vocabulário: {len(tokenizer.token_to_id)} tokens")
     
     # Criar datasets
     print("\n📊 Criando datasets...")
     train_dataset = TextDataset(train_text, tokenizer, args.seq_length)
     val_dataset = TextDataset(val_text, tokenizer, args.seq_length)
+    
+    # Verificar se há dados suficientes
+    if len(train_dataset) == 0:
+        print("❌ Erro: Dados de treino insuficientes!")
+        print(f"   Texto de treino tem {len(train_text)} caracteres")
+        print(f"   Mas apenas {len(tokenizer.encode(train_text))} tokens foram gerados")
+        print(f"   Tente reduzir seq_length (atual: {args.seq_length}) ou aumentar os dados")
+        return
     
     # Criar dataloaders
     train_loader = DataLoader(
@@ -364,7 +375,7 @@ def main():
     # Criar modelo
     print("\n🏗️ Criando modelo...")
     config = GpSRNNConfig(
-        vocab_size=len(tokenizer.vocab),
+        vocab_size=len(tokenizer.token_to_id),
         d_model=args.d_model,
         n_layers=args.n_layers,
         n_heads=args.n_heads,

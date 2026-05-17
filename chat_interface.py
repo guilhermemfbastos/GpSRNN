@@ -22,26 +22,45 @@ def load_model(checkpoint_path=None, device='cuda' if torch.cuda.is_available() 
     """Carrega o modelo e o tokenizer."""
     print(f"🔧 Configurando dispositivo: {device}")
     
-    # Configuração do GpSRNN-8M
-    config = GpSRNNConfig(
-        vocab_size=8192,
-        d_model=256,
-        n_layers=8,
-        n_heads=8,
-        dropout=0.0  # Dropout 0 na inferência
-    )
+    # Se houver checkpoint, primeiro carrega para descobrir o vocab_size real
+    vocab_size = 8192
+    config_from_checkpoint = None
     
-    print("🏗️  Inicializando arquitetura GpSRNN-8M...")
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        print(f"📥 Lendo checkpoint: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        
+        # Salvar config do checkpoint se existir
+        if isinstance(checkpoint, dict) and 'config' in checkpoint:
+            config_from_checkpoint = checkpoint['config']
+            vocab_size = config_from_checkpoint.vocab_size
+            print(f"   Vocab size do checkpoint: {vocab_size}")
+        elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            # Inferir vocab_size do shape do embedding
+            emb_shape = checkpoint['model_state_dict']['token_embedding.weight'].shape[0]
+            vocab_size = emb_shape
+            print(f"   Vocab size inferido: {vocab_size}")
+    
+    # Usar config do checkpoint ou criar nova
+    if config_from_checkpoint:
+        print("🏗️  Recriando arquitetura do checkpoint...")
+        config = config_from_checkpoint
+    else:
+        print("🏗️  Inicializando arquitetura GpSRNN-8M...")
+        config = GpSRNNConfig(
+            vocab_size=vocab_size,
+            d_model=256,
+            n_layers=8,
+            n_heads=8,
+            dropout=0.0
+        )
+    
     model = GpSRNNModel(config)
     model = model.to(device)
-    model.eval()  # Modo de avaliação (desativa dropout, etc.)
+    model.eval()
     
-    # Se houver checkpoint, carrega os pesos
+    # Carregar pesos se checkpoint existe
     if checkpoint_path and os.path.exists(checkpoint_path):
-        print(f"📥 Carregando pesos de: {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path, map_location=device)
-        
-        # Lidar com casos onde o checkpoint é um dict {'model_state_dict': ...} ou direto o state_dict
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'])
         else:
