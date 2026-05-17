@@ -407,12 +407,21 @@ def main():
     # Criar tokenizer
     print("\n🔤 Criando tokenizer...")
     tokenizer = SimpleBPETokenizer(vocab_size=args.vocab_size)
-    # Divide o texto COMPLETO em chunks para treinamento do tokenizer
-    chunk_size = 500
-    all_texts_for_tokenizer = [train_text[i:i+chunk_size] for i in range(0, len(train_text), chunk_size)]
-    print(f"Treinando tokenizer com {len(all_texts_for_tokenizer)} textos...")
+    
+    # Dividir texto em LINHAS/FRASES individuais para treinamento do tokenizer
+    # Isso evita o problema de chunks repetitivos que geram merges gigantes
+    lines = train_text.split('\n')
+    # Filtrar linhas vazias e muito curtas
+    all_texts_for_tokenizer = [line.strip() for line in lines if len(line.strip()) > 5]
+    
+    print(f"Treinando tokenizer com {len(all_texts_for_tokenizer)} frases...")
     tokenizer.train(all_texts_for_tokenizer, target_vocab_size=args.vocab_size)
     print(f"Vocabulário final: {len(tokenizer.token_to_id)} tokens")
+    
+    # Testar tokenização
+    test_encode = tokenizer.encode(train_text[:500], add_special_tokens=False)
+    print(f"  Teste: 500 chars -> {len(test_encode)} tokens")
+    print(f"  Ratio: {len(test_encode)/500:.2f} tokens/char")
     
     # Criar datasets
     print("\n📊 Criando datasets...")
