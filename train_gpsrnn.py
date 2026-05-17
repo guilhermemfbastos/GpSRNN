@@ -24,6 +24,16 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from gp_srrn_8m import GpSRNNConfig, GpSRNNModel, SimpleBPETokenizer
 
+try:
+    from datasets import load_dataset
+    HAS_DATASETS = True
+except ImportError:
+    HAS_DATASETS = False
+    print("Aviso: 'datasets' não instalado. Instalando...")
+    os.system("pip install datasets -q")
+    from datasets import load_dataset
+    HAS_DATASETS = True
+
 
 class TextDataset(Dataset):
     """Dataset de texto para treinamento"""
@@ -59,8 +69,47 @@ class TextDataset(Dataset):
         return x, y
 
 
-def load_training_data(data_path: str, min_chars: int = 10000) -> str:
-    """Carrega dados de treinamento de arquivo(s)"""
+def load_training_data(data_path: str, min_chars: int = 10000, use_huggingface: bool = True) -> str:
+    """Carrega dados de treinamento de arquivo(s) ou Hugging Face"""
+    
+    # Tentar carregar dataset do Hugging Face se não houver caminho especificado
+    if use_huggingface and not data_path:
+        print("🌐 Tentando carregar dataset do Hugging Face...")
+        try:
+            # Dataset de conversação em português e inglês
+            print("  Carregando 'databricks/dolly-15k' (instruções em inglês)...")
+            dataset_en = load_dataset("databricks/dolly-15k", split="train")
+            
+            # Extrair textos das colunas instruction e response
+            texts = []
+            for item in dataset_en:
+                if 'instruction' in item and item['instruction']:
+                    texts.append(f"Instruction: {item['instruction']}\nResponse: {item.get('response', '')}")
+                if 'context' in item and item['context']:
+                    texts.append(f"Context: {item['context']}")
+            
+            # Tentar dataset em português se disponível
+            try:
+                print("  Carregando 'ucberkeley-dose/linguagem-cotidiana' (português)...")
+                dataset_pt = load_dataset("ucberkeley-dose/linguagem-cotidiana", split="train", trust_remote_code=True)
+                for item in dataset_pt:
+                    if 'texto' in item and item['texto']:
+                        texts.append(item['texto'])
+            except Exception as e:
+                print(f"  Dataset em português não disponível: {e}")
+            
+            text = "\n\n".join(texts)
+            print(f"  ✅ Dataset carregado com sucesso!")
+            print(f"  Textos extraídos: {len(texts)}")
+            
+            if len(text) > min_chars:
+                return text
+            else:
+                print(f"  Aviso: Dataset pequeno ({len(text)} chars). Usando dados complementares...")
+        
+        except Exception as e:
+            print(f"  ❌ Erro ao carregar dataset do Hugging Face: {e}")
+            print("  Usando dados de exemplo como fallback...")
     
     if os.path.isdir(data_path):
         # Carregar todos os arquivos .txt do diretório
@@ -81,20 +130,41 @@ def load_training_data(data_path: str, min_chars: int = 10000) -> str:
             text = f.read()
     
     else:
-        # Dados de exemplo (português + inglês)
-        print("Usando dados de exemplo...")
-        text = """
-        Olá! Como você está? Eu sou um modelo de linguagem chamado GpSRNN.
-        Estou aprendendo a gerar texto em português e inglês.
-        The quick brown fox jumps over the lazy dog.
-        Machine learning is a subset of artificial intelligence.
-        O Brasil é um país maravilhoso com muita diversidade cultural.
-        Deep learning models can learn from large amounts of data.
-        A inteligência artificial está transformando o mundo.
-        Natural language processing enables computers to understand human language.
-        Vamos treinar este modelo por várias épocas para melhorar sua performance.
-        Training neural networks requires patience and computational resources.
-        """ * 100  # Repetir para ter dados suficientes
+        # Dados de exemplo (português + inglês) - EXPANDIDO
+        print("Usando dados de exemplo expandidos...")
+        text = ""
+        
+        # Conversas em português
+        conversations_pt = [
+            "Olá! Como você está? Eu sou um assistente virtual aqui para ajudar.",
+            "Bom dia! Que dia lindo hoje, não acha?",
+            "Você pode me explicar o que é inteligência artificial?",
+            "Claro! IA é uma área da computação que cria sistemas capazes de realizar tarefas humanas.",
+            "O Brasil é um país maravilhoso com muita diversidade cultural.",
+            "A inteligência artificial está transformando o mundo moderno.",
+            "Vamos treinar este modelo por várias épocas para melhorar sua performance.",
+            "Machine learning permite que computadores aprendam com dados.",
+            "Deep learning é um subcampo do machine learning baseado em redes neurais.",
+            "Processamento de linguagem natural ajuda computadores a entender texto humano.",
+        ]
+        
+        # Conversas em inglês
+        conversations_en = [
+            "Hello! How are you today? I'm a virtual assistant ready to help.",
+            "Good morning! What a beautiful day, don't you think?",
+            "Can you explain what artificial intelligence is?",
+            "Sure! AI is a field of computer science that creates systems capable of human tasks.",
+            "Machine learning is a subset of artificial intelligence focused on learning from data.",
+            "Deep learning models can learn complex patterns from large datasets.",
+            "Natural language processing enables computers to understand human language.",
+            "Training neural networks requires patience and computational resources.",
+            "The quick brown fox jumps over the lazy dog.",
+            "Technology is advancing rapidly and changing how we live and work.",
+        ]
+        
+        # Repetir e variar as conversas
+        base_texts = conversations_pt + conversations_en
+        text = "\n".join(base_texts * 200)  # Repetir 200 vezes para ter dados suficientes
     
     if len(text) < min_chars:
         print(f"Aviso: Texto muito curto ({len(text)} chars). Repetindo para aumentar...")
