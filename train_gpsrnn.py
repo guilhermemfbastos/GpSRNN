@@ -407,11 +407,12 @@ def main():
     # Criar tokenizer
     print("\n🔤 Criando tokenizer...")
     tokenizer = SimpleBPETokenizer(vocab_size=args.vocab_size)
-    # Divide o texto em chunks para treinamento
-    chunk_size = 1000
-    texts = [text[i:i+chunk_size] for i in range(0, min(len(text), 50000), chunk_size)]
-    tokenizer.train(texts, target_vocab_size=args.vocab_size)
-    print(f"  Vocabulário: {len(tokenizer.token_to_id)} tokens")
+    # Divide o texto COMPLETO em chunks para treinamento do tokenizer
+    chunk_size = 500
+    all_texts_for_tokenizer = [train_text[i:i+chunk_size] for i in range(0, len(train_text), chunk_size)]
+    print(f"Treinando tokenizer com {len(all_texts_for_tokenizer)} textos...")
+    tokenizer.train(all_texts_for_tokenizer, target_vocab_size=args.vocab_size)
+    print(f"Vocabulário final: {len(tokenizer.token_to_id)} tokens")
     
     # Criar datasets
     print("\n📊 Criando datasets...")
