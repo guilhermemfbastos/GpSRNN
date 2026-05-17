@@ -14,25 +14,24 @@ import torch
 import argparse
 import sys
 import os
-from transformers import GPT2Tokenizer
 
 # Importa nossa arquitetura
-from gp_srrn_1b import GpSRNNConfig, GpSRNNModel, count_parameters
+from gp_srrn_8m import GpSRNNConfig, GpSRNNModel, SimpleBPETokenizer, count_parameters
 
 def load_model(checkpoint_path=None, device='cuda' if torch.cuda.is_available() else 'cpu'):
     """Carrega o modelo e o tokenizer."""
     print(f"🔧 Configurando dispositivo: {device}")
     
-    # Configuração idêntica ao treino
+    # Configuração do GpSRNN-8M
     config = GpSRNNConfig(
-        vocab_size=50257,
-        d_model=1536,
-        n_layers=24,
+        vocab_size=8192,
+        d_model=256,
+        n_layers=8,
         n_heads=8,
         dropout=0.0  # Dropout 0 na inferência
     )
     
-    print("🏗️  Inicializando arquitetura GpSRNN-1B...")
+    print("🏗️  Inicializando arquitetura GpSRNN-8M...")
     model = GpSRNNModel(config)
     model = model.to(device)
     model.eval()  # Modo de avaliação (desativa dropout, etc.)
@@ -54,12 +53,16 @@ def load_model(checkpoint_path=None, device='cuda' if torch.cuda.is_available() 
 
     # Contagem de parâmetros
     params = count_parameters(model)
-    print(f"📊 Parâmetros totais: {params['total_billions']:.2f} Bilhões")
+    print(f"📊 Parâmetros totais: {params['total_millions']:.2f} Milhões")
 
-    # Tokenizer (GPT-2 compatible)
-    print("🔤 Carregando tokenizer GPT-2...")
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-    tokenizer.pad_token = tokenizer.eos_token
+    # Tokenizer próprio (BPE simplificado)
+    print("🔤 Inicializando tokenizer BPE...")
+    tokenizer = SimpleBPETokenizer()
+    # Definir atributos necessários para compatibilidade
+    tokenizer.eos_token_id = 3
+    tokenizer.pad_token_id = 0
+    tokenizer.eos_token = '<eos>'
+    tokenizer.pad_token = '<pad>'
     
     return model, tokenizer, device
 
@@ -69,10 +72,10 @@ def decode_tokens(tokens, tokenizer):
     return text
 
 @torch.no_grad()
-def chat_loop(model, tokenizer, device, max_context_length=1024, max_new_tokens=256, temperature=0.8, top_p=0.9):
+def chat_loop(model, tokenizer, device, max_context_length=512, max_new_tokens=128, temperature=0.8, top_p=0.9):
     """Loop principal de conversa."""
     print("\n" + "="*50)
-    print("🤖 GpSRNN-1B Chat Interface")
+    print("🤖 GpSRNN-8M Chat Interface")
     print("="*50)
     print("Comandos úteis:")
     print("  /clear  - Limpa o histórico de conversa")

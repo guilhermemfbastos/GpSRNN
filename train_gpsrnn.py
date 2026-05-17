@@ -22,7 +22,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from gp_srrn_1b import GpSRNNConfig, GpSRNNModel, BPETokenizer
+from gp_srrn_8m import GpSRNNConfig, GpSRNNModel, SimpleBPETokenizer as BPETokenizer
 
 
 class TextDataset(Dataset):
