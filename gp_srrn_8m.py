@@ -141,16 +141,26 @@ class SimpleBPETokenizer:
                     i += 1
             tokens = new_tokens
         
-        # Converte para IDs
+        # Converte para IDs, garantindo que estejam dentro do vocabulário
         ids = []
+        max_id = len(self.token_to_id) - 1
         for token in tokens:
             if token in self.token_to_id:
-                ids.append(self.token_to_id[token])
+                token_id = self.token_to_id[token]
+                # Garante que o ID esteja dentro dos limites
+                if token_id <= max_id:
+                    ids.append(token_id)
+                else:
+                    ids.append(self.token_to_id['<unk>'])
             else:
                 # Token desconhecido - divide em caracteres
                 for char in token:
                     if char in self.token_to_id:
-                        ids.append(self.token_to_id[char])
+                        char_id = self.token_to_id[char]
+                        if char_id <= max_id:
+                            ids.append(char_id)
+                        else:
+                            ids.append(self.token_to_id['<unk>'])
                     else:
                         ids.append(self.token_to_id['<unk>'])
         
@@ -162,8 +172,10 @@ class SimpleBPETokenizer:
     def decode(self, ids: List[int], skip_special_tokens: bool = True) -> str:
         """Decodifica IDs de tokens em texto."""
         tokens = []
+        max_id = len(self.id_to_token) - 1
         for id_ in ids:
-            if id_ in self.id_to_token:
+            # Garante que o ID esteja dentro dos limites
+            if 0 <= id_ <= max_id and id_ in self.id_to_token:
                 token = self.id_to_token[id_]
                 if skip_special_tokens and token in self.special_tokens:
                     continue
@@ -647,16 +659,26 @@ class GpSRNNModel(nn.Module):
         self.apply(self._init_weights)
     
     def _init_weights(self, module):
-        """Inicialização de pesos estilo GPT."""
+        """Inicialização de pesos estilo GPT com cuidado para estabilidade."""
         if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            # Inicialização mais conservadora para evitar explosão
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.01)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.01)
         elif isinstance(module, LayerNorm):
             torch.nn.init.ones_(module.weight)
             torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, TimeMix):
+            # Inicialização especial para os gates do TimeMix
+            torch.nn.init.normal_(module.W_R.weight, mean=0.0, std=0.01)
+            torch.nn.init.normal_(module.W_K.weight, mean=0.0, std=0.01)
+            torch.nn.init.normal_(module.W_V.weight, mean=0.0, std=0.01)
+            torch.nn.init.normal_(module.W_G.weight, mean=0.0, std=0.01)
+            torch.nn.init.normal_(module.W_O.weight, mean=0.0, std=0.01)
+            # Alpha inicia perto de 1 para memória longa
+            torch.nn.init.constant_(module.alpha, 0.9)
     
     def forward(self, 
                 input_ids: torch.Tensor,
@@ -1172,8 +1194,6 @@ def demo_chat():
     examples = [
         "Olá!",
         "Como você está?",
-        "Conte-me uma história curta.",
-        "What is your name?"
     ]
     
     print("\nExemplos de interação (modelo não treinado - respostas aleatórias):\n")
@@ -1181,13 +1201,19 @@ def demo_chat():
     for example in examples:
         print(f"Usuário: {example}")
         try:
-            response = chat.respond(example, max_tokens=50, temperature=0.8)
-            print(f"Assistente: {response[:100]}..." if len(response) > 100 else f"Assistente: {response}")
+            response = chat.respond(example, max_tokens=30, temperature=0.8)
+            # Trunca resposta muito longa
+            if len(response) > 150:
+                response = response[:150] + "..."
+            print(f"Assistente: {response}")
         except Exception as e:
             print(f"Assistente: [Erro na geração: {e}]")
         print()
     
-    print("Para chat interativo, execute: python gp_srrn_1b.py --chat")
+    print("\n" + "=" * 70)
+    print("NOTA: Este modelo precisa ser treinado para gerar texto coerente.")
+    print("Para treinar, use dados de texto em português/inglês.")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
@@ -1207,8 +1233,16 @@ if __name__ == "__main__":
             
             if checkpoint_path:
                 print(f"Carregando checkpoint: {checkpoint_path}")
-                checkpoint = torch.load(checkpoint_path, map_location=device)
-                model.load_state_dict(checkpoint['model_state_dict'])
+                try:
+                    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                    print("Checkpoint carregado com sucesso!")
+                except Exception as e:
+                    print(f"Aviso: Não foi possível carregar o checkpoint: {e}")
+                    print("Usando modelo não treinado.")
+            else:
+                print("Nenhum checkpoint fornecido. Usando modelo não treinado.")
+                print("Dica: Treine o modelo primeiro com: python train_example.py")
             
             tokenizer = create_default_tokenizer()
             chat = ChatInterface(model, tokenizer)
@@ -1219,6 +1253,41 @@ if __name__ == "__main__":
         elif sys.argv[1] == "--demo":
             # Demo de chat
             demo_chat()
+        elif sys.argv[1] == "--train":
+            # Executa treino rápido
+            print("Executando exemplo de treino...")
+            print("Para treino completo, use: python train_example.py")
+            from train_example import train_model, generate_sample
+            config = GpSRNNConfig()
+            model = GpSRNNModel(config)
+            tokenizer = create_default_tokenizer()
+            
+            # Dados mínimos para demonstração
+            texts = [
+                "Olá! Como você está?",
+                "Eu estou bem, obrigado.",
+                "Meu nome é Assistente.",
+                "Hello! How are you?",
+                "I am doing well, thank you.",
+                "My name is Assistant.",
+            ] * 20
+            
+            trained = train_model(
+                model=model,
+                tokenizer=tokenizer,
+                texts=texts,
+                epochs=5,
+                batch_size=4,
+                seq_len=32,
+                lr=1e-3,
+                save_path="gp_srrn_8m_mini.pt"
+            )
+            
+            # Testa geração
+            print("\nTestando geração:")
+            for prompt in ["Olá", "Hello", "Eu"]:
+                output = generate_sample(trained, tokenizer, prompt, max_tokens=20, temperature=0.7)
+                print(f"  '{prompt}' -> {output[:80]}...")
     else:
         # Default: roda testes
         run_tests()
