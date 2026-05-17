@@ -61,10 +61,15 @@ class SimpleBPETokenizer:
                 self.id_to_token[idx] = char
                 idx += 1
     
-    def train(self, texts: List[str], target_vocab_size: int = 8192):
+    def train(self, texts: List[str], target_vocab_size: int = 8192, max_merge_length: int = 15):
         """
         Treina o tokenizer em uma lista de textos.
         Implementação simplificada do algoritmo BPE.
+        
+        Args:
+            texts: Lista de textos para treinamento
+            target_vocab_size: Tamanho alvo do vocabulário
+            max_merge_length: Comprimento máximo dos tokens merged (evita tokens gigantes)
         """
         print(f"Treinando tokenizer com {len(texts)} textos...")
         
@@ -99,6 +104,12 @@ class SimpleBPETokenizer:
             
             # Criar novo token
             new_token = best_pair[0] + best_pair[1]
+            
+            # LIMITAR tamanho do merge para evitar tokens gigantes
+            if len(new_token) > max_merge_length:
+                # Pular este merge - já temos tokens grandes suficientes
+                break
+            
             if new_token not in self.token_to_id:
                 new_id = len(self.token_to_id)
                 self.token_to_id[new_token] = new_id
@@ -106,8 +117,8 @@ class SimpleBPETokenizer:
                 self.merges.append(best_pair)
             
             # Aplicar merge ao corpus
-            new_corpus = []
-            for tokens in corpus:
+            for idx in range(len(corpus)):
+                tokens = corpus[idx]
                 new_tokens = []
                 i = 0
                 while i < len(tokens):
@@ -117,9 +128,7 @@ class SimpleBPETokenizer:
                     else:
                         new_tokens.append(tokens[i])
                         i += 1
-                corpus = [new_tokens]
-                new_corpus.extend(corpus)
-                corpus = new_corpus
+                corpus[idx] = new_tokens
         
         print(f"Vocabulário final: {len(self.token_to_id)} tokens")
     
